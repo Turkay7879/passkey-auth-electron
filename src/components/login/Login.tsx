@@ -10,9 +10,10 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import Typography from '@mui/material/Typography';
 import Container from '@mui/material/Container';
 
-import AuthenticationRemote, { LoginPayload } from "../remote/AuthenticationRemote";
+import AuthenticationRemote, { AddPasskeyPayload, ChallengePayload, LoginBasicPayload, LoginPasskeyPayload } from "../remote/AuthenticationRemote";
 import Alert from "../ui/alerts/Alert";
 import "./Login.css";
+import { Checkbox, FormControlLabel, FormGroup } from "@mui/material";
 
 function Copyright(props: any) {
     return (
@@ -26,24 +27,68 @@ function Copyright(props: any) {
 const Login = () => {
     const [mail, setMail] = useState("");
     const [password, setPassword] = useState("");
+    const [usePasskeyAuth, setUsePasskeyAuth] = useState(false);
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
 
-        const payload: LoginPayload = {
+        const payload: LoginBasicPayload = {
             email: data.get('email')?.toString() || "",
             password: data.get('password')?.toString() || "",
-            usePasskeyAuth: false,
-            challenge: "",
-            digest: ""
+            usePasskeyAuth: usePasskeyAuth
         };
-        AuthenticationRemote.login(payload).then(() => {
-            Alert.success(null, "Logged in successfully!");
-        }).catch((err: string) => {
-            Alert.error("Failed to login!", err);
-        });
+        
+        if (!usePasskeyAuth) {
+            AuthenticationRemote.login(payload).then(() => {
+                Alert.success(null, "Logged in successfully!");
+            }).catch((err: string) => {
+                Alert.error("Failed to login!", err);
+            });
+        } else {
+            const getChallengePayload: ChallengePayload = {
+                email: data.get('email')?.toString() || ""
+            }
+
+            AuthenticationRemote.getChallenge(getChallengePayload).then(async (serverChallenge) => {
+                const digest: string = await window.electron.signChallenge(serverChallenge);
+                const loginPayload: LoginPasskeyPayload = {
+                    email: getChallengePayload.email,
+                    usePasskeyAuth: usePasskeyAuth,
+                    challenge: serverChallenge.challenge,
+                    digest: digest
+                };
+
+                AuthenticationRemote.login(loginPayload).then(() => {
+                    Alert.success(null, "Logged in successfully!");
+                }).catch((err: string) => {
+                    Alert.error("Failed to login!", err);
+                });
+            });
+        }
     };
+
+    const registerPasskey = async () => {
+        if (!mail || mail === "") {
+            return Alert.error(null, "Please enter your e-mail to continue!");
+        }
+
+        const pubKey: string = await window.electron.createPubKey();
+        const payload: AddPasskeyPayload = {
+            email: mail,
+            userPasskeys: [
+                {
+                    publicKey: pubKey
+                }
+            ]
+        };
+
+        AuthenticationRemote.addPasskey(payload).then(() => {
+            Alert.success(null, "Added passkey to your account successfully!");
+        }).catch((err) => {
+            Alert.error(null, err);
+        })
+    }
 
     return (
         <Container component="main" maxWidth="xs">
@@ -77,7 +122,8 @@ const Login = () => {
             />
             <TextField
               margin="normal"
-              required
+              required={!usePasskeyAuth}
+              disabled={usePasskeyAuth}
               fullWidth
               name="password"
               label="Password"
@@ -87,6 +133,11 @@ const Login = () => {
               value={password || ""}
               onChange={(e) => setPassword(e.target.value)}
             />
+            <FormGroup>
+                <FormControlLabel control={
+                    <Checkbox onChange={(e) => setUsePasskeyAuth(e.target.checked)}/>
+                } label="Use Passkey Authentication with TPM"/>
+            </FormGroup>
             <Button
               type="submit"
               fullWidth
@@ -95,18 +146,13 @@ const Login = () => {
             >
               Sign In
             </Button>
-            <Grid container>
-              <Grid item xs>
-                <Link href="#" variant="body2">
-                  Forgot password?
-                </Link>
-              </Grid>
-              <Grid item>
-                <Link href="#" variant="body2">
-                  {"Don't have an account? Sign Up"}
-                </Link>
-              </Grid>
-            </Grid>
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={registerPasskey}
+            >
+              Register Passkey
+            </Button>
           </Box>
         </Box>
         <Copyright sx={{ mt: 8, mb: 4 }} />

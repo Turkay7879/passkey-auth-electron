@@ -1,5 +1,6 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import { spawn } from 'child_process';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -9,8 +10,8 @@ if (require('electron-squirrel-startup')) {
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 620,
+    height: 725,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
@@ -51,3 +52,39 @@ app.on('activate', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and import them here.
+ipcMain.handle('sign-challenge', async (event, args) => {
+  const { challenge, keyAuth } = args;
+  let result = await runTPM2Ops(path.join(__dirname, '..', '..', 'src', 'exec', process.platform, 'TPM2-Ops'), ['SIGN', challenge, keyAuth]);
+  result = result.replaceAll("\r", "").replaceAll("\n", "");
+  return result;
+});
+
+ipcMain.handle('create-public-key', async (event, args) => {
+  let result: string = await runTPM2Ops(path.join(__dirname, '..', '..', 'src', 'exec', process.platform, 'TPM2-Ops'), ['CREATE']);
+  result = result.replaceAll("\r", "").replaceAll("\n", "");
+  return result;
+});
+
+async function runTPM2Ops(executablePath: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executablePath, args);
+
+        let output = '';
+
+        child.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+            output += data.toString();
+        });
+
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve(output);
+            } else {
+                reject(new Error(`Executable exited with code ${code}`));
+            }
+        });
+  });
+}
